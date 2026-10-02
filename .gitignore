@@ -1,0 +1,11 @@
+node_modules
+dist
+*.local
+.env
+.env.*
+!.env.production
+!.env.example
+# never commit research data or images
+dataset*.json
+*-import*.json
+private/

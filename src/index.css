@@ -1,0 +1,80 @@
+@import "tailwindcss";
+@import "@fontsource/public-sans/400.css";
+@import "@fontsource/public-sans/500.css";
+@import "@fontsource/public-sans/600.css";
+@import "@fontsource/public-sans/700.css";
+@import "@fontsource/source-serif-4/600.css";
+
+@theme {
+  --font-sans: "Public Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-serif: "Source Serif 4", Georgia, serif;
+  --color-ink: #1f3b33;
+  --color-ink-2: #46594f;
+  --color-ink-3: #75877e;
+  --color-paper: #f3f6f3;
+  --color-surface: #ffffff;
+  --color-line: #d5ded8;
+  --color-line-2: #e7ece9;
+  --color-pine-50: #eaf1ed;
+  --color-pine-100: #d6e4dc;
+  --color-flag: #e5397a;
+  --color-flag-soft: #fde6ef;
+  --color-amber-ink: #8a5a0b;
+  --color-amber-bg: #fbf0d9;
+  --color-brick-ink: #94331f;
+  --color-brick-bg: #f9e2dc;
+}
+
+@layer base {
+html, body, #root { height: 100%; }
+body {
+  margin: 0;
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+  font-variant-numeric: tabular-nums;
+}
+button, input, select, textarea { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--color-flag); outline-offset: 2px; border-radius: 4px; }
+::selection { background: var(--color-flag-soft); }
+
+/* Survey convention: solid = confirmed, dashed = not confirmed */
+.line-confirmed { border-style: solid; }
+.line-unconfirmed { border-style: dashed; }
+
+.scroll-thin { scrollbar-width: thin; scrollbar-color: var(--color-line) transparent; }
+
+}
+
+/* Map markers (rendered inside Google Advanced Markers) */
+.cfl-marker { position: relative; cursor: pointer; display: grid; place-items: center; }
+.cfl-marker .stake {
+  width: 22px; height: 22px; border-radius: 999px; border: 3px solid var(--color-flag);
+  background: #fff; box-shadow: 0 1px 3px rgba(20, 40, 33, 0.45); display: grid; place-items: center;
+  transition: transform 120ms ease;
+}
+.cfl-marker .stake::after { content: ""; width: 6px; height: 6px; border-radius: 999px; background: var(--color-ink); }
+.cfl-marker.confirmed .stake { background: var(--color-flag); border-color: #fff; }
+.cfl-marker.confirmed .stake::after { background: #fff; }
+.cfl-marker.unconfirmed .stake { border-style: dashed; }
+.cfl-marker.verify .stake::after { content: "?"; width: auto; height: auto; background: none; font: 700 11px/1 var(--font-sans); color: var(--color-ink); }
+.cfl-marker.selected .stake { transform: scale(1.35); box-shadow: 0 0 0 4px rgba(31, 59, 51, 0.85), 0 2px 6px rgba(0,0,0,.4); }
+.cfl-marker.dim { opacity: 0.35; }
+.cfl-marker .due {
+  position: absolute; top: -3px; right: -5px; width: 9px; height: 9px; background: var(--color-ink); border: 2px solid #fff; border-radius: 2px;
+}
+.cfl-marker .tip {
+  position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%);
+  background: var(--color-surface); color: var(--color-ink); border: 1px solid var(--color-line); border-radius: 6px;
+  padding: 7px 10px; white-space: nowrap; font: 500 12px/1.35 var(--font-sans); box-shadow: 0 4px 14px rgba(20, 40, 33, 0.18);
+  pointer-events: none; opacity: 0; transition: opacity 100ms ease; text-align: left;
+}
+.cfl-marker .tip b { display: block; font: 600 13px/1.3 var(--font-serif); }
+.cfl-marker:hover .tip, .cfl-marker:focus-visible .tip { opacity: 1; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition: none !important; animation: none !important; }
+}
