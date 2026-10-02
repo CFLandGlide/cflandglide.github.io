@@ -1,10 +1,8 @@
 import { create } from 'zustand'
-import type { AllData, DataIssue, GeocodeCheck, Note, Property, PropertyImage } from './types'
+import type { AllData, DataIssue, Note, Property, PropertyImage } from './types'
 import { createStore, type DataStore, type Session, type TableName } from './lib/store'
 import { EMPTY_FILTERS, type Filters } from './lib/search'
-import { COUNTY_SOURCE, fetchCountyParcel } from './lib/county'
-import { distanceToGeometryM } from './lib/geo'
-import type { GoogleLibs } from './lib/maps'
+import { COUNTY_SOURCE, countyAddress, fetchCountyParcel } from './lib/county'
 
 export type View = 'map' | 'list' | 'review' | 'check' | 'settings'
 
@@ -23,10 +21,8 @@ interface AppState {
   query: string
   filters: Filters
   revealed: Record<string, boolean>
-  streetViewFor: string | null
   toasts: Toast[]
   busy: string | null
-  google: GoogleLibs | null
 
   init(): Promise<void>
   refreshSession(): Promise<void>
@@ -38,9 +34,7 @@ interface AppState {
   setFilters(f: Partial<Filters>): void
   clearFilters(): void
   reveal(id: string): void
-  openStreetView(id: string | null): void
   toast(text: string, kind?: 'ok' | 'error'): void
-  setGoogle(g: GoogleLibs): void
 
   updateProperty(id: string, patch: Partial<Property>, what?: string): Promise<boolean>
   updateRow<T extends { id: string }>(table: TableName, id: string, patch: Partial<T>, what?: string): Promise<boolean>
@@ -52,7 +46,6 @@ interface AppState {
   uploadImage(pid: string, file: File, caption: string): Promise<boolean>
   saveSetting(key: string, value: unknown): Promise<boolean>
   locateParcels(onlyMissing: boolean): Promise<void>
-  checkAddresses(): Promise<void>
 }
 
 let toastId = 1
@@ -64,7 +57,7 @@ const mergeRow = <T extends { id: string }>(list: T[], row: T) => {
 export const useApp = create<AppState>((set, get) => ({
   store: null, ready: false, session: null, member: false, data: null, loadError: null,
   view: 'map', selectedId: null, panelTab: 'overview', query: '', filters: EMPTY_FILTERS, revealed: {},
-  streetViewFor: null, toasts: [], busy: null, google: null,
+  toasts: [], busy: null,
 
   async init() {
     const store = await createStore()
@@ -94,20 +87,18 @@ export const useApp = create<AppState>((set, get) => ({
     }
   },
 
-  setView: (view) => set({ view, streetViewFor: view === 'map' ? get().streetViewFor : null }),
-  select: (selectedId, tab) => set({ selectedId, panelTab: tab ?? (selectedId === get().selectedId ? get().panelTab : 'overview'), streetViewFor: null }),
+  setView: (view) => set({ view }),
+  select: (selectedId, tab) => set({ selectedId, panelTab: tab ?? (selectedId === get().selectedId ? get().panelTab : 'overview') }),
   setTab: (panelTab) => set({ panelTab }),
   setQuery: (query) => set({ query }),
   setFilters: (f) => set({ filters: { ...get().filters, ...f } }),
   clearFilters: () => set({ filters: EMPTY_FILTERS }),
   reveal: (id) => set({ revealed: { ...get().revealed, [id]: !get().revealed[id] } }),
-  openStreetView: (streetViewFor) => set({ streetViewFor, view: streetViewFor ? 'map' : get().view }),
   toast(text, kind = 'ok') {
     const id = toastId++
     set({ toasts: [...get().toasts, { id, text, kind }].slice(-2) })
     setTimeout(() => set({ toasts: get().toasts.filter((t) => t.id !== id) }), kind === 'error' ? 8000 : 2600)
   },
-  setGoogle: (google) => set({ google }),
 
   async updateProperty(id, patch, what) {
     const d = get().data!
@@ -239,8 +230,10 @@ export const useApp = create<AppState>((set, get) => ({
       const fresh = get().data!.properties.find((x) => x.id === p.id)!
       if (r.status === 'found' && r.centroid) {
         found++
-        const geo = prev?.geocode
-        const status = fresh.address_status === 'exact' && geo ? (geo.result === 'agrees' ? 'exact_confirmed' : 'needs_verification') : 'parcel_located'
+        // An exact address is confirmed only when the county's own record for this parcel lists the same site address
+        const norm = (x: string | null | undefined) => String(x ?? '').toUpperCase().replace(/[^A-Z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim()
+        const ca = countyAddress(r.attributes)
+        const status = fresh.address_status === 'exact' && ca && norm(ca) === norm(fresh.address_line) ? 'exact_confirmed' : 'parcel_located'
         await get().updateProperty(p.id, { lat: r.centroid.lat, lng: r.centroid.lng, geometry: r.geometry ?? null, location_source: COUNTY_SOURCE,
           location_checked_at: fetched_at, location_status: status })
       } else if (r.status === 'error') {
@@ -256,46 +249,5 @@ export const useApp = create<AppState>((set, get) => ({
       get().toast(`County lookup: ${found} located, ${missing} not found${failed ? `, ${failed} failed (try again)` : ''}`, failed ? 'error' : 'ok')
       await store.logEvent(null, 'locate', `County parcel lookup: ${found} located, ${missing} not found, ${failed} failed`)
     }
-  },
-
-  async checkAddresses() {
-    const g = get().google
-    if (!g) { get().toast('Add the Google Maps key in Settings first.', 'error'); return }
-    const store = get().store!
-    const d = get().data!
-    const lookups = new Map(d.parcel_lookups.map((l) => [l.property_id, l]))
-    const targets = d.properties.filter((p) => p.address_status === 'exact' && p.address_line && lookups.get(p.id)?.status === 'found' && p.location_status !== 'manual')
-    const geocoder = new g.geocoding.Geocoder()
-    let agree = 0
-    for (const [i, p] of targets.entries()) {
-      set({ busy: `Checking address ${i + 1} of ${targets.length} with Google…` })
-      const l = lookups.get(p.id)!
-      const query = `${p.address_line}, ${p.city ?? 'Jupiter'}, ${p.state ?? 'FL'}${p.zip ? ' ' + p.zip : ''}`
-      let check: GeocodeCheck
-      try {
-        const res = await geocoder.geocode({ address: query, componentRestrictions: { country: 'US' } })
-        const top = res.results[0]
-        if (!top) check = { query, status: 'ZERO_RESULTS', result: 'no_result' }
-        else {
-          const loc = { lat: top.geometry.location.lat(), lng: top.geometry.location.lng() }
-          const dist = distanceToGeometryM(loc, l.geometry) ?? Infinity
-          const precise = ['ROOFTOP', 'RANGE_INTERPOLATED'].includes(String(top.geometry.location_type))
-          const numberMatches = top.address_components.some((c) => c.types.includes('street_number') && p.address_line!.startsWith(c.long_name + ' '))
-          check = { query, status: 'OK', formatted_address: top.formatted_address, location_type: String(top.geometry.location_type), lat: loc.lat, lng: loc.lng,
-            distance_to_parcel_m: dist, inside_parcel: dist === 0, result: precise && numberMatches && dist <= 100 ? 'agrees' : 'disagrees' }
-        }
-      } catch (e) {
-        const msg = (e as Error).message
-        check = { query, status: msg, result: /ZERO_RESULTS/.test(msg) ? 'no_result' : 'error' }
-      }
-      if (check.result === 'error') continue
-      if (check.result === 'agrees') agree++
-      await store.upsertLookup({ ...l, geocode: check, geocode_checked_at: new Date().toISOString() })
-      await get().updateProperty(p.id, { location_status: check.result === 'agrees' ? 'exact_confirmed' : 'needs_verification' })
-    }
-    await get().load()
-    set({ busy: null })
-    get().toast(`Address check: ${agree} of ${targets.length} confirmed`)
-    await store.logEvent(null, 'geocode', `Google address check: ${agree} of ${targets.length} matched the county parcel`)
-  },
+  }
 }))

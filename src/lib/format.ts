@@ -56,7 +56,7 @@ export const ADDRESS_LABEL: Record<string, string> = {
 }
 
 export const LOCATION_LABEL: Record<string, string> = {
-  exact_confirmed: 'Exact location confirmed',
+  exact_confirmed: 'Exact address confirmed (county record)',
   parcel_located: 'Located by parcel ID',
   needs_verification: 'Location needs verification',
   not_confirmed: 'Location not confirmed',

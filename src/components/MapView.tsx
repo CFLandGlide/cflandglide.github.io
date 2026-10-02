@@ -1,18 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import L from 'leaflet'
+import 'leaflet/dist/leaflet.css'
 import { MapPinOff } from 'lucide-react'
 import { useApp } from '../state'
 import { useDerived } from '../derived'
-import { loadGoogle, onMapsAuthFailure } from '../lib/maps'
+import { TILES } from '../lib/maps'
 import { classNames, hasLocation, propertyTitle, today } from '../lib/format'
 import { outerRings } from '../lib/geo'
 import { DEFAULT_CENTER } from '../config'
 import type { Owner, Property } from '../types'
-import { StreetViewOverlay } from './StreetViewOverlay'
-import { Button } from './ui'
 
 const PINK = '#E5397A'
 
-type Overlay = { marker: google.maps.marker.AdvancedMarkerElement; el: HTMLDivElement; shapes: (google.maps.Polygon | google.maps.Polyline)[]; sig: string }
+type Overlay = { marker: L.Marker; shapes: L.Polygon[]; sig: string }
 
 function markerClass(p: Property, selected: boolean, dim: boolean) {
   const confirmed = p.location_status === 'exact_confirmed'
@@ -20,24 +20,25 @@ function markerClass(p: Property, selected: boolean, dim: boolean) {
   return classNames('cfl-marker', confirmed ? 'confirmed' : 'unconfirmed', verify && 'verify', selected && 'selected', dim && 'dim')
 }
 
+function esc(s: string) {
+  return s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!))
+}
+
+/** The small hover card: address, owner name and status only (no phones or relatives). */
 function tipHtml(p: Property, o: Owner | undefined) {
-  const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!))
   const title = p.address_status === 'exact' ? propertyTitle(p) : `${p.address_line ? p.address_line + ' — ' : ''}address not confirmed`
   return `<b>${esc(title)}</b>Owner: ${esc(o?.owner_name ?? 'not in source')}<br/>Status: ${esc(p.status)}`
 }
 
 export function MapView() {
   const { data, hits } = useDerived()
-  const { selectedId, select, setGoogle, google, streetViewFor } = useApp()
-  const key = data?.settings.maps_api_key
-  const mapId = data?.settings.maps_map_id || 'DEMO_MAP_ID'
+  const { selectedId, select, view } = useApp()
   const div = useRef<HTMLDivElement>(null)
-  const map = useRef<google.maps.Map | null>(null)
+  const map = useRef<L.Map | null>(null)
+  const layers = useRef<{ map: L.TileLayer; satellite: L.TileLayer } | null>(null)
   const overlays = useRef(new Map<string, Overlay>())
   const fitted = useRef(false)
-  const [state, setState] = useState<'nokey' | 'loading' | 'ready' | 'error' | 'auth'>(key ? 'loading' : 'nokey')
-  const [err, setErr] = useState('')
-  const [mapType, setMapType] = useState<'hybrid' | 'roadmap'>('hybrid')
+  const [mapType, setMapType] = useState<'map' | 'satellite'>('satellite')
   const [showUnmapped, setShowUnmapped] = useState(false)
 
   const owners = useMemo(() => new Map((data?.owners ?? []).map((o) => [o.property_id, o])), [data])
@@ -45,30 +46,43 @@ export function MapView() {
   const located = useMemo(() => (data?.properties ?? []).filter((p) => !p.archived && hasLocation(p)), [data])
   const unmapped = useMemo(() => (data?.properties ?? []).filter((p) => !p.archived && !hasLocation(p)), [data])
 
-  // Load Google Maps once a key exists
+  // Create the map once
   useEffect(() => {
-    if (!key) { setState('nokey'); return }
-    let cancelled = false
-    setState('loading')
-    const off = onMapsAuthFailure(() => setState('auth'))
-    loadGoogle(key).then((g) => {
-      if (cancelled || !div.current) return
-      setGoogle(g)
-      map.current = new g.maps.Map(div.current, {
-        center: DEFAULT_CENTER, zoom: 13, mapId, mapTypeId: 'hybrid', mapTypeControl: false, streetViewControl: false,
-        fullscreenControl: false, clickableIcons: false, gestureHandling: 'greedy', tilt: 0,
-      })
-      setState('ready')
-    }).catch((e) => { if (!cancelled) { setErr(String(e?.message ?? e)); setState('error') } })
-    return () => { cancelled = true; off() }
-  }, [key, mapId, setGoogle])
+    if (!div.current || map.current) return
+    const m = L.map(div.current, { center: [DEFAULT_CENTER.lat, DEFAULT_CENTER.lng], zoom: 13, zoomControl: false, maxZoom: 19 })
+    L.control.zoom({ position: 'bottomright' }).addTo(m)
+    const mk = (t: (typeof TILES)[keyof typeof TILES]) => L.tileLayer(t.url, { attribution: t.attribution, maxNativeZoom: t.maxNativeZoom, maxZoom: 19 })
+    layers.current = { map: mk(TILES.map), satellite: mk(TILES.satellite) }
+    layers.current.satellite.addTo(m)
+    map.current = m
+    // Leaflet must re-measure when the map was hidden (e.g. after visiting the List view)
+    const ro = new ResizeObserver(() => m.invalidateSize())
+    ro.observe(div.current)
+    return () => { ro.disconnect(); m.remove(); map.current = null; overlays.current.clear(); fitted.current = false }
+  }, [])
 
-  useEffect(() => { map.current?.setMapTypeId(mapType) }, [mapType])
+  useEffect(() => {
+    const m = map.current, l = layers.current
+    if (!m || !l) return
+    const [on, off] = mapType === 'map' ? [l.map, l.satellite] : [l.satellite, l.map]
+    if (m.hasLayer(off)) m.removeLayer(off)
+    if (!m.hasLayer(on)) on.addTo(m)
+  }, [mapType])
+
+  // Frame all parcels — only once the map is actually visible (a hidden map has no size to fit into)
+  const fitAll = () => {
+    const m = map.current
+    if (!m || fitted.current || !located.length || !div.current || div.current.clientWidth === 0) return
+    m.invalidateSize()
+    m.fitBounds(L.latLngBounds(located.map((p) => [p.lat!, p.lng!] as [number, number])), { padding: [80, 80], maxZoom: 16 })
+    fitted.current = true
+  }
+  useEffect(() => { if (view === 'map') setTimeout(() => { map.current?.invalidateSize(); fitAll() }, 0) })
 
   // Draw / update markers and parcel outlines
   useEffect(() => {
     const m = map.current
-    if (state !== 'ready' || !m || !google) return
+    if (!m) return
     const keep = new Set<string>()
     const due = today()
     for (const p of located) {
@@ -78,98 +92,75 @@ export function MapView() {
       const sig = JSON.stringify([p.lat, p.lng, p.location_status, p.status, p.follow_up_date, p.address_line, owners.get(p.id)?.owner_name, selected, dim, !!p.geometry])
       const existing = overlays.current.get(p.id)
       if (existing && existing.sig === sig) continue
-      if (existing) { existing.marker.map = null; existing.shapes.forEach((s) => s.setMap(null)) }
-      const el = document.createElement('div')
-      el.className = markerClass(p, selected, dim)
-      el.innerHTML = `<span class="stake"></span>${p.follow_up_date && p.follow_up_date <= due ? '<span class="due" title="Follow-up due"></span>' : ''}<span class="tip">${tipHtml(p, owners.get(p.id))}</span>`
-      const marker = new google.marker.AdvancedMarkerElement({ map: m, position: { lat: p.lat!, lng: p.lng! }, content: el, gmpClickable: true,
-        title: `${propertyTitle(p)} — account ${p.account_number ?? 'none'}`, zIndex: selected ? 1000 : dim ? 1 : 10 })
-      marker.addEventListener('gmp-click', () => useApp.getState().select(p.id))
-      const shapes: Overlay['shapes'] = []
+      if (existing) { existing.marker.remove(); existing.shapes.forEach((s) => s.remove()) }
       const confirmed = p.location_status === 'exact_confirmed'
+      const shapes: L.Polygon[] = []
       for (const ring of outerRings(p.geometry)) {
-        const path = ring.map(([lng, lat]) => ({ lat, lng }))
-        const fill = new google.maps.Polygon({ map: m, paths: path, clickable: true, fillColor: PINK, fillOpacity: selected ? 0.18 : dim ? 0.03 : 0.08,
-          strokeColor: selected ? '#fff' : PINK, strokeOpacity: confirmed ? (dim ? 0.35 : 1) : 0, strokeWeight: selected ? 3 : 2, zIndex: selected ? 5 : 1 })
-        fill.addListener('click', () => useApp.getState().select(p.id))
-        shapes.push(fill)
-        if (!confirmed) {
-          // dashed outline = location from parcel ID, street address not confirmed
-          shapes.push(new google.maps.Polyline({ map: m, path: [...path, path[0]], clickable: false, strokeOpacity: 0, zIndex: selected ? 6 : 2,
-            icons: [{ icon: { path: 'M 0,-1 0,1', strokeOpacity: dim ? 0.35 : 1, strokeColor: selected ? '#fff' : PINK, strokeWeight: selected ? 3 : 2.2, scale: 3 }, offset: '0', repeat: '11px' }] }))
-        }
+        const poly = L.polygon(ring.map(([lng, lat]) => [lat, lng] as [number, number]), {
+          color: selected ? '#ffffff' : PINK, weight: selected ? 3 : 2, opacity: dim ? 0.35 : 1,
+          dashArray: confirmed ? undefined : '7 6', // dashed = located by parcel ID, address not confirmed
+          fillColor: PINK, fillOpacity: selected ? 0.2 : dim ? 0.03 : 0.1,
+        }).addTo(m)
+        poly.on('click', () => useApp.getState().select(p.id))
+        shapes.push(poly)
       }
-      overlays.current.set(p.id, { marker, el, shapes, sig })
+      const icon = L.divIcon({
+        className: '', iconSize: [22, 22], iconAnchor: [11, 11],
+        html: `<div class="${markerClass(p, selected, dim)}" data-marker="1" data-id="${esc(p.id)}"><span class="stake"></span>${p.follow_up_date && p.follow_up_date <= due ? '<span class="due" title="Follow-up due"></span>' : ''}<span class="tip">${tipHtml(p, owners.get(p.id))}</span></div>`,
+      })
+      const marker = L.marker([p.lat!, p.lng!], { icon, keyboard: true, alt: `${propertyTitle(p)}, account ${p.account_number ?? 'none'}`, zIndexOffset: selected ? 1000 : dim ? -100 : 0 }).addTo(m)
+      marker.on('click', () => useApp.getState().select(p.id))
+      overlays.current.set(p.id, { marker, shapes, sig })
     }
-    for (const [id, o] of overlays.current) if (!keep.has(id)) { o.marker.map = null; o.shapes.forEach((s) => s.setMap(null)); overlays.current.delete(id) }
-    if (!fitted.current && located.length) {
-      const b = new google.core.LatLngBounds()
-      located.forEach((p) => b.extend({ lat: p.lat!, lng: p.lng! }))
-      m.fitBounds(b, 80)
-      fitted.current = true
-    }
-  }, [state, google, located, hitIds, selectedId, owners])
+    for (const [id, o] of overlays.current) if (!keep.has(id)) { o.marker.remove(); o.shapes.forEach((s) => s.remove()); overlays.current.delete(id) }
+    fitAll()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [located, hitIds, selectedId, owners])
 
   // Bring the selected property into view (only when the selection changes)
   const panned = useRef<string | null>(null)
   useEffect(() => {
     const m = map.current
     const p = located.find((x) => x.id === selectedId)
-    if (!m || !p || state !== 'ready' || panned.current === selectedId) return
+    if (!selectedId) { panned.current = null; return }
+    if (!m || !p || panned.current === selectedId || !div.current || div.current.clientWidth === 0) return
     panned.current = selectedId
-    m.panTo({ lat: p.lat!, lng: p.lng! })
-    if ((m.getZoom() ?? 0) < 16) m.setZoom(17)
-  }, [selectedId, located, state])
-  useEffect(() => { if (!selectedId) panned.current = null }, [selectedId])
+    m.setView([p.lat!, p.lng!], Math.max(m.getZoom(), 17), { animate: true })
+  }, [selectedId, located, view])
 
-  // When a search narrows results, frame them (only when the set of matches changes)
+  // When a search narrows the results, frame the matches
   const framed = useRef('')
   useEffect(() => {
     const m = map.current
-    if (!m || !google || state !== 'ready') return
+    if (!m || !div.current || div.current.clientWidth === 0) return
     const shown = located.filter((p) => hitIds.has(p.id))
     const sig = shown.map((p) => p.id).join(',')
     if (sig === framed.current) return
     framed.current = sig
     if (!shown.length || shown.length === located.length) return
-    const b = new google.core.LatLngBounds()
-    shown.forEach((p) => b.extend({ lat: p.lat!, lng: p.lng! }))
-    if (shown.length === 1) { m.panTo(b.getCenter()); m.setZoom(17) } else m.fitBounds(b, 80)
-  }, [hitIds, located, google, state])
+    if (shown.length === 1) m.setView([shown[0].lat!, shown[0].lng!], 17)
+    else m.fitBounds(L.latLngBounds(shown.map((p) => [p.lat!, p.lng!] as [number, number])), { padding: [80, 80] })
+  }, [hitIds, located, view])
 
   return (
-    <div className="relative h-full w-full bg-[#dfe6e1]">
-      <div ref={div} className="absolute inset-0" />
-      {state !== 'ready' && (
-        <div className="absolute inset-0 grid place-items-center p-6">
-          <div className="max-w-md rounded-lg border border-line bg-surface p-5 text-[13.5px] shadow-sm">
-            {state === 'nokey' && <><p className="mb-1 font-semibold">The map needs a Google Maps key</p><p className="mb-3 text-ink-2">Add the key and Map ID in Settings → Google Maps. Everything else works without it, including the list, notes and review queue.</p><Button onClick={() => useApp.getState().setView('settings')}>Open settings</Button></>}
-            {state === 'loading' && <p className="text-ink-2">Loading Google Maps…</p>}
-            {state === 'auth' && <><p className="mb-1 font-semibold">Google rejected the map key</p><p className="text-ink-2">Check that the key is correct, that billing is on, that “Maps JavaScript API” is enabled, and that the key allows this website’s address.</p></>}
-            {state === 'error' && <><p className="mb-1 font-semibold">Google Maps didn’t load</p><p className="text-ink-2">{err || 'Check the internet connection and the key in Settings.'}</p></>}
-          </div>
-        </div>
-      )}
-      {state === 'ready' && (
-        <>
-          <div className="absolute left-3 top-3 flex overflow-hidden rounded-md border border-line bg-surface text-[13px] shadow-sm" role="group" aria-label="Map type">
-            {(['roadmap', 'hybrid'] as const).map((t) => (
-              <button key={t} onClick={() => setMapType(t)} aria-pressed={mapType === t} className={classNames('px-3 py-1.5 font-medium', mapType === t ? 'bg-ink text-white' : 'text-ink-2 hover:bg-pine-50')}>
-                {t === 'roadmap' ? 'Map' : 'Satellite'}
-              </button>
-            ))}
-          </div>
-          <div className="absolute bottom-6 left-3 rounded-md border border-line bg-surface/95 px-3 py-2 text-[12px] text-ink-2 shadow-sm">
-            <p className="mb-1 font-semibold text-ink">Map key</p>
-            <p className="flex items-center gap-2"><span className="inline-block h-3.5 w-3.5 rounded-full border-2 border-white bg-flag shadow" /> Exact address confirmed (solid outline)</p>
-            <p className="flex items-center gap-2"><span className="inline-block h-3.5 w-3.5 rounded-full border-2 border-dashed border-flag bg-white" /> Located by parcel ID, address not confirmed (dashed)</p>
-            <p className="flex items-center gap-2"><span className="grid h-3.5 w-3.5 place-items-center rounded-full border-2 border-dashed border-flag bg-white text-[9px] font-bold text-ink">?</span> Location needs verification</p>
-            <p className="flex items-center gap-2"><span className="inline-block h-2.5 w-2.5 rounded-[2px] bg-ink" /> Follow-up due</p>
-          </div>
-        </>
-      )}
+    <div className="relative isolate h-full w-full bg-[#dfe6e1]">
+      <div ref={div} className="absolute inset-0 z-0" />
+      <div className="absolute left-3 top-3 z-[1000] flex overflow-hidden rounded-md border border-line bg-surface text-[13px] shadow-sm" role="group" aria-label="Map type">
+        {(['map', 'satellite'] as const).map((t) => (
+          <button key={t} onClick={() => setMapType(t)} aria-pressed={mapType === t} className={classNames('px-3 py-1.5 font-medium', mapType === t ? 'bg-ink text-white' : 'text-ink-2 hover:bg-pine-50')}>
+            {t === 'map' ? 'Map' : 'Satellite'}
+          </button>
+        ))}
+      </div>
+      <div className="absolute bottom-6 left-3 z-[1000] rounded-md border border-line bg-surface/95 px-3 py-2 text-[12px] text-ink-2 shadow-sm">
+        <p className="mb-1 font-semibold text-ink">Map key</p>
+        <p className="flex items-center gap-2"><span className="inline-block h-3.5 w-3.5 rounded-full border-2 border-white bg-flag shadow" /> Exact address confirmed (solid outline)</p>
+        <p className="flex items-center gap-2"><span className="inline-block h-3.5 w-3.5 rounded-full border-2 border-dashed border-flag bg-white" /> Located by parcel ID, address not confirmed (dashed)</p>
+        <p className="flex items-center gap-2"><span className="grid h-3.5 w-3.5 place-items-center rounded-full border-2 border-dashed border-flag bg-white text-[9px] font-bold text-ink">?</span> Location needs verification</p>
+        <p className="flex items-center gap-2"><span className="inline-block h-2.5 w-2.5 rounded-[2px] bg-ink" /> Follow-up due</p>
+      </div>
       {unmapped.length > 0 && (
-        <div className="absolute right-3 top-3 w-72">
+        <div className="absolute right-3 top-3 z-[1000] w-72">
           <button onClick={() => setShowUnmapped(!showUnmapped)} className="ml-auto flex items-center gap-1.5 rounded-md border border-line bg-surface px-3 py-1.5 text-[13px] font-medium shadow-sm hover:border-ink-3">
             <MapPinOff size={15} /> Not on the map ({unmapped.length})
           </button>
@@ -185,7 +176,6 @@ export function MapView() {
           )}
         </div>
       )}
-      {streetViewFor && google && <StreetViewOverlay propertyId={streetViewFor} />}
     </div>
   )
 }

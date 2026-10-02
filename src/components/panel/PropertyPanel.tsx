@@ -4,7 +4,7 @@ import { useApp } from '../../state'
 import { useDerived } from '../../derived'
 import { issuesFor } from '../../lib/checks'
 import { ADDRESS_LABEL, classNames, fullAddress, hasLocation, LOCATION_LABEL, propertySubtitle, propertyTitle } from '../../lib/format'
-import { directionsUrl, googleMapsUrl } from '../../lib/maps'
+import { directionsUrl, googleMapsUrl, streetViewUrl } from '../../lib/maps'
 import { Tag } from '../ui'
 import { OverviewTab } from './OverviewTab'
 import { OwnerTab } from './OwnerTab'
@@ -16,7 +16,7 @@ import { HistoryTab } from './HistoryTab'
 import { EditPropertyDialog } from './EditPropertyDialog'
 
 export function PropertyPanel() {
-  const { selectedId, select, panelTab, setTab, updateProperty, openStreetView, toast, session, google } = useApp()
+  const { selectedId, select, panelTab, setTab, updateProperty, toast, session } = useApp()
   const { data, items } = useDerived()
   const [editing, setEditing] = useState(false)
   const p = data!.properties.find((x) => x.id === selectedId)
@@ -33,8 +33,8 @@ export function PropertyPanel() {
   const conflicts = mine.filter((i) => i.status === 'open' && i.severity !== 'info').length
   const located = hasLocation(p)
   const lookup = data!.parcel_lookups.find((l) => l.property_id === p.id)
-  const dest = p.location_status === 'exact_confirmed' && lookup?.geocode?.lat ? { lat: lookup.geocode.lat, lng: lookup.geocode.lng! } : located ? { lat: p.lat!, lng: p.lng! } : null
-  const svAllowed = located && !!p.geometry && p.location_status !== 'manual'
+  const dest = located ? { lat: p.lat!, lng: p.lng! } : null
+  void lookup
   const copy = async (text: string, what: string) => { try { await navigator.clipboard.writeText(text); toast(`${what} copied`) } catch { toast('Copy failed — select the text instead', 'error') } }
   // Show the relatives / associates tab only when the source lists people of that kind (a record has one or the other)
   const people: [string, string, number?][] = []
@@ -89,7 +89,7 @@ export function PropertyPanel() {
         </div>
 
         <div className="mt-3 flex flex-wrap gap-1.5">
-          {action('Street View', <Eye size={14} />, () => openStreetView(p.id), !svAllowed ? (located ? 'Street View is off for manually placed locations' : 'Street View unavailable: no confirmed location') : !google ? 'Google Maps is not loaded' : false)}
+          {action('Street View', <Eye size={14} />, () => window.open(streetViewUrl(dest!.lat, dest!.lng), '_blank', 'noopener'), !dest && 'Street View unavailable: no confirmed location')}
           {action('Open in Google Maps', <ExternalLink size={14} />, () => window.open(googleMapsUrl(dest!.lat, dest!.lng), '_blank', 'noopener'), !dest && 'No confirmed location')}
           {action('Directions', <Navigation size={14} />, () => window.open(directionsUrl(dest!.lat, dest!.lng), '_blank', 'noopener'), !dest && 'No confirmed location')}
           {action('Copy address', <Copy size={14} />, () => copy(p.address_status === 'exact' ? fullAddress(p) : `${p.site_address_as_written ?? ''} (address not confirmed; account ${p.account_number ?? 'none'})`, 'Address'))}

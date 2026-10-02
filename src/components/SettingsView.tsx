@@ -3,7 +3,7 @@ import { ArrowDown, ArrowUp, Trash2 } from 'lucide-react'
 import { useApp } from '../state'
 import type { AuditEntry } from '../types'
 import { dateTime } from '../lib/format'
-import { Button, inputCls, Label } from './ui'
+import { Button, inputCls } from './ui'
 import { describe } from './panel/HistoryTab'
 
 function ListEditor({ title, k, help, usage }: { title: string; k: 'statuses' | 'verification_statuses' | 'note_categories'; help: string; usage?: (name: string) => number }) {
@@ -49,26 +49,6 @@ function ListEditor({ title, k, help, usage }: { title: string; k: 'statuses' | 
       </form>
       {err && <p role="alert" className="mt-2 text-[13px] text-brick-ink">{err}</p>}
       <div className="mt-3 flex gap-2"><Button kind="primary" disabled={!dirty} onClick={save}>Save {title.toLowerCase()}</Button>{dirty && <Button kind="quiet" onClick={() => setItems(list)}>Undo changes</Button>}</div>
-    </section>
-  )
-}
-
-function MapsSettings() {
-  const { data, saveSetting } = useApp()
-  const [key, setKey] = useState(data!.settings.maps_api_key ?? '')
-  const [mapId, setMapId] = useState(data!.settings.maps_map_id ?? '')
-  return (
-    <section className="rounded-lg border border-line bg-surface p-4">
-      <h2 className="text-[15px] font-semibold">Google Maps</h2>
-      <p className="mb-3 text-[13px] text-ink-2">The map, satellite view, Street View and address checks need a Google Maps key and a Map ID. The key is stored in your private database, not in the website’s code. Restrict it in Google Cloud to this website’s address.</p>
-      <div className="grid gap-3 sm:grid-cols-2">
-        <div><Label htmlFor="gk">Maps API key</Label><input id="gk" className={inputCls} value={key} onChange={(e) => setKey(e.target.value.trim())} placeholder="AIza…" autoComplete="off" /></div>
-        <div><Label htmlFor="gm">Map ID</Label><input id="gm" className={inputCls} value={mapId} onChange={(e) => setMapId(e.target.value.trim())} placeholder="e.g. 8f2c1a7b3d4e5f60" /></div>
-      </div>
-      <div className="mt-3 flex items-center gap-3">
-        <Button kind="primary" onClick={async () => { await saveSetting('maps_api_key', key); await saveSetting('maps_map_id', mapId); if (confirm('Saved. Reload the page now so the map uses the new key?')) location.reload() }}>Save and reload</Button>
-        <span className="text-[12px] text-ink-3">APIs to enable: Maps JavaScript API, Geocoding API.</span>
-      </div>
     </section>
   )
 }
@@ -130,7 +110,7 @@ export function SettingsView() {
     <div className="scroll-thin h-full overflow-y-auto">
       <div className="mx-auto grid max-w-5xl gap-5 px-6 py-6 lg:grid-cols-2">
         <h1 className="font-serif text-[26px] font-semibold lg:col-span-2">Settings</h1>
-        <div className="lg:col-span-2"><MapsSettings /></div>
+        <p className="text-[13px] text-ink-2 lg:col-span-2">Maps: OpenStreetMap and USGS aerial imagery (free, no key or billing). Parcel outlines come from Palm Beach County’s public parcel data.</p>
         <ListEditor title="Statuses" k="statuses" usage={use('status')} help="The research workflow. Rename an entry to rename it on every property that uses it (each change is logged)." />
         <ListEditor title="Verification levels" k="verification_statuses" usage={use('verification_status')} help="How far a record has been checked." />
         <ListEditor title="Note categories" k="note_categories" help="Optional labels for notes." />

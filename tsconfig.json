@@ -12,7 +12,7 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "noEmit": true,
-    "types": ["google.maps", "vite/client", "geojson"]
+    "types": ["vite/client", "geojson"]
   },
   "include": ["src"]
 }

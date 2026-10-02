@@ -16,7 +16,7 @@ function Row({ label, value, note, warn }: { label: string; value: number | stri
 
 export function DataCheck() {
   const { data } = useDerived()
-  const { locateParcels, checkAddresses, busy, google, select, setView } = useApp()
+  const { locateParcels, busy, select, setView } = useApp()
   const r = validationReport(data!)
   const lookups = new Map(data!.parcel_lookups.map((l) => [l.property_id, l]))
   const props = [...data!.properties].filter((p) => !p.archived).sort((a, b) => (a.record_no ?? 999) - (b.record_no ?? 999))
@@ -53,10 +53,8 @@ export function DataCheck() {
               </div>
             </div>
             <div className="rounded-lg border border-line bg-surface p-4">
-              <p className="text-[14px] font-semibold">Check exact addresses with Google</p>
-              <p className="mt-1 text-[13px] text-ink-2">For the {r.exactAddress} records with a full street address, checks that Google puts the address on the same county parcel. Only matching ones become “Exact location confirmed”.</p>
-              <div className="mt-3"><Button disabled={!!busy || !google} onClick={() => checkAddresses()} title={!google ? 'Needs the Google Maps key (Settings), then open the Map once' : undefined}>Check addresses</Button></div>
-              {!google && <p className="mt-2 text-[12px] text-ink-3">Needs the Google Maps key in Settings. Open the Map once after adding it.</p>}
+              <p className="text-[14px] font-semibold">How exact addresses are confirmed</p>
+              <p className="mt-1 text-[13px] text-ink-2">A street address becomes “Exact location confirmed” only when the county’s own record for that parcel lists the same site address. Otherwise it stays “Located by parcel ID” and shows up in the Review queue.</p>
             </div>
           </div>
         </div>
@@ -66,7 +64,7 @@ export function DataCheck() {
           <table className="w-full text-[13px]">
             <thead><tr className="border-b border-line text-left text-ink-2">
               <th className="px-3 py-2 font-semibold">#</th><th className="px-3 py-2 font-semibold">Property</th><th className="px-3 py-2 font-semibold">Account #</th>
-              <th className="px-3 py-2 font-semibold">Address in source</th><th className="px-3 py-2 font-semibold">County lookup</th><th className="px-3 py-2 font-semibold">Google check</th><th className="px-3 py-2 font-semibold">On the map as</th>
+              <th className="px-3 py-2 font-semibold">Address in source</th><th className="px-3 py-2 font-semibold">County lookup</th><th className="px-3 py-2 font-semibold">County site address</th><th className="px-3 py-2 font-semibold">On the map as</th>
             </tr></thead>
             <tbody>
               {props.map((p) => {
@@ -78,7 +76,7 @@ export function DataCheck() {
                     <td className="px-3 py-2">{p.account_number ?? 'None'}</td>
                     <td className="px-3 py-2">{p.record_type === 'unidentified' ? <Tag tone="brick">Unidentified</Tag> : <Tag dashed={p.address_status !== 'exact'}>{ADDRESS_LABEL[p.address_status]}</Tag>}</td>
                     <td className="px-3 py-2">{p.record_type === 'unidentified' ? 'Not looked up' : !l ? 'Not yet' : l.status === 'found' ? 'Parcel found' : l.status === 'not_found' ? 'Not found' : l.status === 'multiple' ? 'Several matches' : `Failed: ${l.error ?? ''}`}</td>
-                    <td className="px-3 py-2">{p.address_status !== 'exact' ? '—' : !l?.geocode ? 'Not yet' : l.geocode.result === 'agrees' ? 'Agrees' : l.geocode.result === 'no_result' ? 'No result' : `Differs (${Math.round(l.geocode.distance_to_parcel_m ?? 0)} m)`}</td>
+                    <td className="px-3 py-2">{l?.status !== 'found' ? '—' : String(l.attributes?.SITE_ADDR_STR ?? '').trim() || <span className="text-ink-3">(none on county record)</span>}</td>
                     <td className="px-3 py-2">{LOCATION_LABEL[p.location_status]}</td>
                   </tr>
                 )

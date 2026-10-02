@@ -1,32 +1,25 @@
-import { importLibrary, setOptions } from '@googlemaps/js-api-loader'
-
-export interface GoogleLibs {
-  maps: google.maps.MapsLibrary
-  marker: google.maps.MarkerLibrary
-  streetView: google.maps.StreetViewLibrary
-  geocoding: google.maps.GeocodingLibrary
-  core: google.maps.CoreLibrary
-}
-
-let loading: Promise<GoogleLibs> | null = null
-let authFailed = false
-const authListeners = new Set<() => void>()
-
-export function onMapsAuthFailure(cb: () => void) { authListeners.add(cb); if (authFailed) cb(); return () => { authListeners.delete(cb) } }
-
-export function loadGoogle(apiKey: string): Promise<GoogleLibs> {
-  if (loading) return loading
-  ;(window as unknown as { gm_authFailure: () => void }).gm_authFailure = () => { authFailed = true; authListeners.forEach((l) => l()) }
-  setOptions({ key: apiKey, v: 'weekly' })
-  loading = Promise.all([importLibrary('maps'), importLibrary('marker'), importLibrary('streetView'), importLibrary('geocoding'), importLibrary('core')])
-    .then(([maps, marker, streetView, geocoding, core]) => ({ maps, marker, streetView, geocoding, core }))
-    .catch((e) => { loading = null; throw e })
-  return loading
-}
+// Free map sources (no key, no billing) and plain Google Maps links.
+export const TILES = {
+  map: {
+    url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+    attribution: '© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors',
+    maxNativeZoom: 19,
+  },
+  satellite: {
+    // U.S. Geological Survey imagery with road labels (public domain)
+    url: 'https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryTopo/MapServer/tile/{z}/{y}/{x}',
+    attribution: 'Imagery: <a href="https://www.usgs.gov/programs/national-geospatial-program/national-map" target="_blank" rel="noopener">USGS The National Map</a>',
+    maxNativeZoom: 16,
+  },
+} as const
 
 export function googleMapsUrl(lat: number, lng: number) {
   return `https://www.google.com/maps/search/?api=1&query=${lat.toFixed(6)},${lng.toFixed(6)}`
 }
 export function directionsUrl(lat: number, lng: number) {
   return `https://www.google.com/maps/dir/?api=1&destination=${lat.toFixed(6)},${lng.toFixed(6)}`
+}
+/** Opens Google's own Street View (free, in a new tab) at the nearest imagery to this point. */
+export function streetViewUrl(lat: number, lng: number) {
+  return `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${lat.toFixed(6)},${lng.toFixed(6)}`
 }
