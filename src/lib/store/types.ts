@@ -33,4 +33,5 @@ export interface DataStore {
   logEvent(propertyId: string | null, action: string, note: string): Promise<void>
   uploadFile(path: string, file: Blob, contentType: string): Promise<void>
   fileUrl(path: string): Promise<string>
+  fileExists(path: string): Promise<boolean>
 }

@@ -6,7 +6,8 @@ export interface ImportBundle {
   version: number
   meta: { name: string; source: string; built_at: string; decisions: string[] }
   tables: Record<string, Record<string, unknown>[]>
-  images: { id: string; property_id: string; storage_path: string; content_type: string; sha256: string; base64: string }[]
+  images: { id: string; property_id: string; storage_path: string; content_type: string; sha256: string; base64?: string }[]
+  images_separate?: boolean
 }
 
 export interface PreCheck { label: string; ok: boolean; detail: string; blocking: boolean }
@@ -59,11 +60,15 @@ export async function preCheck(b: ImportBundle): Promise<PreCheck[]> {
   const shared = [...phoneProps.values()].filter((s) => s.size > 1).length
   checks.push({ label: 'No phone number is listed under two different properties', ok: shared === 0, detail: shared ? `${shared} number(s) appear under more than one property — they will stay separate` : `${phoneProps.size} numbers checked`, blocking: false })
   let badImg = 0
+  const separate = b.images.filter((im) => !im.base64)
   for (const im of b.images) {
     if (!pids.has(im.property_id)) badImg++
-    else if ((await sha256(b64(im.base64))) !== im.sha256) badImg++
+    else if (im.base64 && (await sha256(b64(im.base64))) !== im.sha256) badImg++
   }
-  checks.push({ label: 'Images are intact and each belongs to its property', ok: badImg === 0, detail: badImg ? `${badImg} image(s) failed` : `${b.images.length} images match their original fingerprints`, blocking: true })
+  checks.push({ label: 'Images are intact and each belongs to its property', ok: badImg === 0,
+    detail: badImg ? `${badImg} image(s) failed` : separate.length
+      ? `${separate.length} images are added on the next screen, where each is matched to its property by fingerprint`
+      : `${b.images.length} images match their original fingerprints`, blocking: true })
   return checks
 }
 
@@ -74,11 +79,16 @@ export async function runImport(store: DataStore, b: ImportBundle, progress: (ms
     await store.insertMany(name, rows)
   }
   let i = 0
-  for (const im of b.images) {
-    progress(`Uploading image ${++i} of ${b.images.length}…`)
-    await store.uploadFile(im.storage_path, new Blob([b64(im.base64) as BlobPart], { type: im.content_type }), im.content_type)
+  const withFiles = b.images.filter((im) => im.base64)
+  for (const im of withFiles) {
+    progress(`Uploading image ${++i} of ${withFiles.length}…`)
+    await store.uploadFile(im.storage_path, new Blob([b64(im.base64!) as BlobPart], { type: im.content_type }), im.content_type)
   }
   progress('Saving image records…')
   await store.insertMany('property_images', b.tables.property_images ?? [])
   await store.logEvent(null, 'import', `Imported source document: ${b.meta.source}`)
+}
+
+export async function fileFingerprint(f: Blob) {
+  return sha256(new Uint8Array(await f.arrayBuffer()))
 }

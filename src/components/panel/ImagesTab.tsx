@@ -18,7 +18,7 @@ function Thumb({ img, onOpen }: { img: PropertyImage; onOpen: () => void }) {
   return (
     <button onClick={onOpen} className="group block overflow-hidden rounded-md border border-line text-left hover:border-ink-3">
       <div className="grid aspect-[2/1] place-items-center bg-paper">
-        {url ? <img src={url} alt={img.caption ?? 'Property image'} className="h-full w-full object-cover" /> : <span className="text-[12px] text-ink-3">{err ? 'Image could not load' : 'Loading…'}</span>}
+        {url ? <img src={url} alt={img.caption ?? 'Property image'} className="h-full w-full object-cover" onError={() => null} /> : <span className="px-3 text-center text-[12px] text-ink-3">{err ? (img.is_source ? 'Original image not uploaded yet. Add it in Data check → Original images.' : 'Image could not load') : 'Loading…'}</span>}
       </div>
       <div className="px-2.5 py-2">
         <p className="text-[13px] font-medium">{img.caption ?? img.file_name}</p>

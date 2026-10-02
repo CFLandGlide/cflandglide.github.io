@@ -3,6 +3,7 @@ import { useDerived } from '../derived'
 import { validationReport } from '../lib/checks'
 import { ADDRESS_LABEL, classNames, LOCATION_LABEL, propertyTitle } from '../lib/format'
 import { Button, Tag } from './ui'
+import { SourceImages } from './SourceImages'
 
 function Row({ label, value, note, warn }: { label: string; value: number | string; note?: string; warn?: boolean }) {
   return (
@@ -42,6 +43,7 @@ export function DataCheck() {
             </tbody>
           </table>
           <div className="space-y-4">
+            <SourceImages />
             <div className="rounded-lg border border-line bg-surface p-4">
               <p className="text-[14px] font-semibold">Locate parcels</p>
               <p className="mt-1 text-[13px] text-ink-2">Looks up each parcel ID in Palm Beach County’s public parcel data and draws its outline. Addresses are never guessed. {r.countyChecked} of {r.total} checked so far.</p>

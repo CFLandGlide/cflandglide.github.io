@@ -16,7 +16,7 @@ export function ImportScreen() {
     <div className="scroll-thin h-full overflow-y-auto">
       <div className="mx-auto max-w-2xl px-6 py-10">
         <h1 className="font-serif text-[26px] font-semibold">Import the research document</h1>
-        <p className="mt-1 text-[13.5px] text-ink-2">Logged in as {session?.name}. The database is empty. Choose the prepared import file (<b>cflandglide-import.json</b>). It is checked first; nothing is saved unless every check passes.</p>
+        <p className="mt-1 text-[13.5px] text-ink-2">Logged in as {session?.name}. The database is empty. Choose the prepared data file (<b>cflandglide-data.json</b>). It is checked first; nothing is saved unless every check passes.</p>
         <input type="file" accept=".json,application/json" aria-label="Import file" className="mt-5 text-[13.5px]" onChange={async (e) => {
           const f = e.target.files?.[0]; if (!f) return
           setErr(null); setChecks(null); setBundle(null)
@@ -28,7 +28,7 @@ export function ImportScreen() {
             <p className="text-[14px] font-semibold">{bundle.meta.source}</p>
             <p className="mt-1 text-[13px] text-ink-2">
               {t.properties.filter((p) => p.record_type === 'property').length} properties, {t.properties.filter((p) => p.record_type === 'unidentified').length} unidentified block,{' '}
-              {t.owner_contacts.length} owner phone numbers, {t.relatives.length} possible relatives, {t.associates.length} possible associates, {bundle.images.length} images, {t.data_issues.length} review items.
+              {t.owner_contacts.length} owner phone numbers, {t.relatives.length} possible relatives, {t.associates.length} possible associates, {bundle.images.length} images{bundle.images.some((i) => !i.base64) ? ' (added on the next screen)' : ''}, {t.data_issues.length} review items.
             </p>
             <h2 className="mt-4 mb-2 text-[13.5px] font-semibold">Checks before import</h2>
             <ul className="space-y-1.5">

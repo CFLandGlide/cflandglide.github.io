@@ -220,6 +220,7 @@ export class LocalStore implements DataStore {
     if (await kvGet('file:' + path)) return
     await kvSet('file:' + path, file)
   }
+  async fileExists(path: string) { return !!(await kvGet('file:' + path)) }
   async fileUrl(path: string) {
     const f = await kvGet<Blob>('file:' + path)
     if (!f) throw new Error('Loading image: file not found')

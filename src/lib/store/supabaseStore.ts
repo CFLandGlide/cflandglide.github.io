@@ -156,6 +156,12 @@ export class SupabaseStore implements DataStore {
     if (error && !/already exists|Duplicate/i.test(error.message)) throw new Error(`Uploading image: ${error.message}`)
   }
 
+  async fileExists(path: string) {
+    const i = path.lastIndexOf('/')
+    const { data } = await this.sb.storage.from(BUCKET).list(path.slice(0, i), { search: path.slice(i + 1), limit: 100 })
+    return !!data?.some((f) => f.name === path.slice(i + 1))
+  }
+
   async fileUrl(path: string) {
     const c = this.urlCache.get(path)
     if (c && c.exp > Date.now()) return c.url
